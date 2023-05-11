@@ -594,10 +594,18 @@ def run_tvla(ctx: typer.Context):
                     # For now, don't perform any filtering when doing general fixed-vs-random TVLA.
                     traces_to_use = np.zeros(len(project.waves), dtype=bool)
                     traces_to_use[trace_start:trace_end + 1] = True
+                    keys_nparrays = []
+                    for i in range(num_traces_max):
+                        keys_nparrays.append(np.frombuffer(project.keys[i], dtype=np.uint8))
+                    fixed_key = keys_nparrays[0]
+                    for i in range(trace_start, trace_end+1):
+                        traces_to_use[i] = not np.array_equal(fixed_key, keys_nparrays[i])
 
                     if i_step == 0:
                         # Keep a single trace to create the figures.
                         single_trace = traces[1]
+
+                    traces = traces[traces_to_use[trace_start:trace_end + 1]]
 
                 if save_to_disk_trace:
                     log.info("Saving Traces")
@@ -707,8 +715,14 @@ def run_tvla(ctx: typer.Context):
                 # We do general fixed-vs-random TVLA. The "leakage" is indicating whether a trace
                 # belongs to the fixed (1) or random (0) group.
                 leakage = np.zeros((num_traces), dtype=np.uint8)
+                KEY_BIT = 15
+                BIT_IN_BYTE = KEY_BIT % 8
+                KEY_BYTE = KEY_BIT // 8
+                print(KEY_BYTE)
+                print(BIT_IN_BYTE)
                 for i in range(num_traces):
-                    leakage[i] = np.array_equal(fixed_key, keys[i])
+                    #leakage[i] = np.array_equal(fixed_key, keys[i])
+                    leakage[i] = (keys[i][KEY_BYTE] >> BIT_IN_BYTE) % 2
 
             # Uncomment the function call below for debugging e.g. when the t-test results aren't
             # centered around 0.
