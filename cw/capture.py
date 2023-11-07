@@ -330,9 +330,15 @@ def capture_aes_random_batch(ot, ktp, capture_cfg, scope_type, device_cfg):
       capture_cfg: Capture configuration.
       scope_type: cw or waverunner as a scope for batch capture.
     """
-    # Seed host's PRNG.
-    # TODO: Replace this with a dedicated PRNG to avoid other packages breaking our code.
-    random.seed(capture_cfg["batch_prng_seed"])
+    set_default = 1
+    ot.target.simpleserial_write("e", set_default.to_bytes(4, "little"))
+    time.sleep(0.5)
+    plaintext_random = bytearray([0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC,
+                                  0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC])
+
+    # Set the cipher for advancing the fixed and random data
+    Key_g = 0x123456789abcdef123456789abcde0f0
+    cipher_g = AES.new(Key_g.to_bytes(16, 'big'), AES.MODE_ECB)
     # Set the target's key
     key = ktp.next_key()
     tqdm.write(f'Using key: {binascii.b2a_hex(bytes(key))}')
@@ -370,7 +376,12 @@ def capture_aes_random_batch(ot, ktp, capture_cfg, scope_type, device_cfg):
             check_range(waves, ot.scope.adc.bits_per_sample)
 
             # Generate plaintexts and ciphertexts to compare with the batch encryption results.
-            plaintexts = [ktp.next()[1] for _ in range(scope.num_segments_actual)]
+            plaintexts = []
+            for ii in range(scope.num_segments_actual):
+                plaintext = np.asarray(list(plaintext_random))
+                plaintext_random = cipher_g.encrypt(plaintext_random)
+                plaintexts.append(plaintext)
+
             ciphertexts = [
                 bytearray(c)
                 for c in scared.aes.base.encrypt(
@@ -494,6 +505,9 @@ def capture_aes_fvsr_key_batch(ot, ktp, capture_cfg, scope_type, gen_ciphertexts
       capture_cfg: Capture configuration.
       scope_type: cw or waverunner as a scope for batch capture.
     """
+    set_default = 1
+    ot.target.simpleserial_write("e", set_default.to_bytes(4, "little"))
+    time.sleep(0.5)
     # Seed host's PRNG.
     # TODO: Replace this with a dedicated PRNG to avoid other packages breaking our code.
     random.seed(capture_cfg["batch_prng_seed"])
@@ -507,8 +521,18 @@ def capture_aes_fvsr_key_batch(ot, ktp, capture_cfg, scope_type, gen_ciphertexts
     time.sleep(0.5)
     key_fixed = bytearray([0x81, 0x1E, 0x37, 0x31, 0xB0, 0x12, 0x0A, 0x78,
                            0x42, 0x78, 0x1E, 0x22, 0xB2, 0x5C, 0xDD, 0xF9])
+    plaintext_fixed = bytearray([0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
+                                 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA])
+    key_random = bytearray([0x53, 0x53, 0x53, 0x53, 0x53, 0x53, 0x53, 0x53,
+                            0x53, 0x53, 0x53, 0x53, 0x53, 0x53, 0x53, 0x53])
+    plaintext_random = bytearray([0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC,
+                                  0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC])
     tqdm.write(f'Fixed key: {binascii.b2a_hex(bytes(key_fixed))}')
     ot.target.simpleserial_write("t", key_fixed)
+
+    # Set the cipher for advancing the fixed and random data
+    Key_g = 0x123456789abcdef123456789abcde0f0
+    cipher_g = AES.new(Key_g.to_bytes(16, 'big'), AES.MODE_ECB)
 
     sample_fixed = 1
     is_first_batch = True
@@ -551,9 +575,15 @@ def capture_aes_fvsr_key_batch(ot, ktp, capture_cfg, scope_type, gen_ciphertexts
             for ii in range(scope.num_segments_actual):
                 if sample_fixed:
                     key = np.asarray(key_fixed)
+                    plaintext = np.asarray(list(plaintext_fixed))
+                    # Advance fixed
+                    plaintext_fixed = cipher_g.encrypt(plaintext_fixed)
                 else:
-                    key = np.asarray(ktp.next()[1])
-                plaintext = np.asarray(ktp.next()[1])
+                    key = np.asarray(list(key_random))
+                    plaintext = np.asarray(list(plaintext_random))
+                    # Advance random
+                    key_random = cipher_g.encrypt(key_random)
+                    plaintext_random = cipher_g.encrypt(plaintext_random)
                 keys.append(key)
                 plaintexts.append(plaintext)
                 if gen_ciphertexts:
